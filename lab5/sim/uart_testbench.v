@@ -28,6 +28,15 @@ module uart_testbench();
     wire data_out_valid;
     reg data_out_ready;
 
+    //Test back to back UART
+    reg [7:0] on_data_in;
+    reg on_data_in_valid;
+    wire on_data_in_ready;
+
+    wire [7:0] screen_out;
+    wire screen_out_valid;
+    reg screen_out_ready;
+
     uart # (
         .CLOCK_FREQ(`CLOCK_FREQ),
         .BAUD_RATE(`BAUD_RATE)
@@ -37,9 +46,12 @@ module uart_testbench();
         .data_in(data_in),
         .data_in_valid(data_in_valid),
         .data_in_ready(data_in_ready),
-        .data_out(), // We aren't using the receiver of the off-chip UART, only the transmitter
-        .data_out_valid(),
-        .data_out_ready(),
+        .data_out(screen_out), // We aren't using the receiver of the off-chip UART, only the transmitter
+        .data_out_valid(screen_out_valid),
+        .data_out_ready(screen_out_ready),
+        // .data_out(),
+        // .data_out_valid(),
+        // .data_out_ready(),
         .serial_in(FPGA_SERIAL_RX),
         .serial_out(FPGA_SERIAL_TX)
     );
@@ -50,9 +62,12 @@ module uart_testbench();
     ) on_chip_uart (
         .clk(clk),
         .reset(reset),
-        .data_in(), // We aren't using the transmitter of the on-chip UART, only the receiver
-        .data_in_valid(),
-        .data_in_ready(),
+        .data_in(on_data_in), // We aren't using the transmitter of the on-chip UART, only the receiver
+        .data_in_valid(on_data_in_valid), // added data_in, data_in_valid, data_in_ready for back to back UART
+        .data_in_ready(on_data_in_ready), // 
+        // .data_in(),
+        // .data_in_valid(),
+        // .data_in_ready(),
         .data_out(data_out),
         .data_out_valid(data_out_valid),
         .data_out_ready(data_out_ready),
@@ -120,7 +135,52 @@ module uart_testbench();
                 if (data_out_valid == 1'b1) begin
                     $display("Failure 4: on chip UART didn't clear data_out_valid when data_out_ready was asserted");
                 end
+                // done = 1;
+
+
+                /****** Test back to back UART ******/
+                // Wait until the on_chip_uart's transmitter is ready
+                while (on_data_in_ready == 1'b0) @(posedge clk); #1;
+
+                // Send a character to the on chip UART's transmitter to transmit over the serial line
+                on_data_in = data_out;
+                on_data_in_valid = 1'b1;
+                @(posedge clk); #1;
+                on_data_in_valid = 1'b0;
+
+                // Now, the transmitter should be sending the data_in over the FPGA_SERIAL_RX line to the on chip UART
+
+                // We wait until the off chip UART's receiver indicates that is has valid data it has received
+                while (screen_out_valid == 1'b0) @(posedge clk); #1;
+
+                // Now, data_out of the off chip UART should contain the data that was sent to it by the off chip UART
+                if (screen_out !== 8'h21) begin
+                    $display("Failure b1: on chip UART got data: %h, but expected: %h", screen_out, 8'h21);
+                end
+
+                // If we wait a few more clock cycles, the data should still be held by the receiver
+                repeat (10) @(posedge clk); #1;
+                if (screen_out !== 8'h21) begin
+                    $display("Failure b2: on chip UART got correct data, but it didn't hold screen_out until screen_out_ready was asserted");
+                end
+
+                // At this point, the on chip UART's transmitter should be idle and the FPGA_SERIAL_RX line should be in the idle state
+                if (FPGA_SERIAL_RX !== 1'b1) begin
+                    $display("Failure b3: FPGA_SERIAL_RX was not high when the off chip UART's transmitter should be idle");
+                end
+
+               
+                // Now, if we assert screen_out_ready to the on chip UART's receiver, it should pull its screen_out_valid signal low
+                screen_out_ready = 1'b1;
+                @(posedge clk); #1;
+                screen_out_ready = 1'b0;
+                @(posedge clk); #1;
+                if (screen_out_valid == 1'b1) begin
+                    $display("Failure b4: on chip UART didn't clear screen_out_valid when screen_out_ready was asserted");
+                end
                 done = 1;
+                
+
             end
             begin
                 repeat (25000) @(posedge clk);
