@@ -18,54 +18,48 @@ module uart_transmitter #(
     reg [CLOCK_COUNTER_WIDTH-1:0] clock_counter;
 
     wire symbol_edge;
-    wire tx_running;
-    wire start;
+    wire tx_running; 
 
+    reg state; //0: idle  & 1: transfer
     reg [3:0] bit_counter;
     reg [9:0] tx_register;
-    reg [3:0] sent;
 
+    // Goes high at every symbol edge
     /* verilator lint_off WIDTH */
     assign symbol_edge = clock_counter == (SYMBOL_EDGE_TIME - 1);
     /* lint_on */
+
+    // Goes high while we are sending a character
     assign tx_running = bit_counter != 4'd0;
 
+    //Outputs
+    assign serial_out = tx_running ? tx_register[bit_counter - 1] : 1'b1;
+    assign data_in_ready = !tx_running;
+
+    // Counts cycles until a single symbol is done
     always@(posedge clk) begin
         clock_counter <= (reset || symbol_edge) ? 0: clock_counter + 1;
     end
 
-    // always@(posedge clk) begin
-    //     if (reset) begin
-    //         bit_counter <= 0;
-    //         tx_register <= 0;
-    //         sent <= 0;
-    //     end else if (data_in_valid) begin
-    //         tx_register <= {1'b1, data_in, 1'b0};
-    //         sent <= 0;
-    //     end else if (symbol_edge && sent < 10) begin
-    //         bit_counter <= (bit_counter >= 4'd9) ? 4'd0 : bit_counter + 4'd1;
-    //         sent <= sent + 4'd1;
-    //     end
-    // end
-
+    // Counts down from 10 bits for every character
     always@(posedge clk) begin
-        if(reset) begin
+        if (reset) begin
+            state <= 0;
             bit_counter <= 0;
             tx_register <= 0;
-        end else if (data_in_valid && !tx_running) begin
-            bit_counter <= 4'd10;
-            tx_register <= {1'b1, data_in, 1'b0};
-        end else if (symbol_edge && tx_running) begin
-            bit_counter <= bit_counter - 4'd1;
-            tx_register <= tx_register >> 1;
         end
+        if (data_in_valid) begin
+            state <= 1;
+            tx_register <= {1'b1, data_in, 1'b0};
+        end
+        if (state && symbol_edge)
+            if (bit_counter < 9)
+                bit_counter <= bit_counter + 4'd1;
+            else begin
+                bit_counter <= 0;
+                state <= 0;
+            end
     end
-
-
-    //--|Signal Assignments|------------------------------------------------------
-    // assign serial_out = (bit_counter == 0) ? 1'b1 : tx_register[bit_counter - 1];
-    assign serial_out = (bit_counter == 0) ? 1'b1 : tx_register[0];
-    assign data_in_ready = !tx_running;
 
 endmodule
     
