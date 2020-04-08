@@ -348,8 +348,55 @@ module fifo_testbench();
             end
         end
 
+        /* Write and read from the FIFO on the same cycle */
+        rst = 1'b1;
+        @(posedge clk); #1;
+        rst = 1'b0;
+        @(posedge clk); #1;
 
+        // range from 10 to 15
+        start = 15;
+        finish = 20;        
+        
+        fork
+            begin
+                // Begin pushing data into the FIFO 
+                for (i = start; i < finish; i = i + 1) begin
+                    write_to_fifo(test_vals[i], 1'b0);
 
+                    // Perform checks on empty, full (disable check on empty for async FIFO due to synchronization delay)
+                    if (empty === 1'b1) begin
+                        $display("Failure: While being filled, FIFO said it was empty");
+                    end
+                    if (full === 1'b1) begin
+                        $display("Failure: While being filled, FIFO was full before all entries were written");
+                    end
+                end                
+            end
+            begin
+                // Read from the FIFO one by one 
+                for (i = start; i < finish-1; i = i + 1) begin
+                    read_from_fifo(1'b0, received_vals[i]);
+                    // Perform checks on empty, full
+                    if (empty === 1'b1) begin
+                        $display("Failure: FIFO was empty as its being drained, i = %d", i);
+                        $finish();
+                    end
+                    if (full === 1'b1) begin
+                        $display("Failure: FIFO was full as its being drained, i = %d", i);
+                        $finish();
+                    end
+                end
+                read_from_fifo(1'b0, received_vals[i]);
+            end
+        join
+
+        // Finally, let's check that the data we received from the FIFO equals the data that we wrote to it
+        for (i = start; i < finish; i = i + 1) begin
+            if (test_vals[i] !== received_vals[i]) begin
+                $display("Failure: Data received from FIFO not equal to data written. Entry %d, got %d, expected %d", i, received_vals[i], test_vals[i]);
+            end
+        end
 
         // SUCCESS! Print out some debug info.
         $display("This testbench was run with these params:");
